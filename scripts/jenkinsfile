@@ -1,54 +1,108 @@
 pipeline {
-
-    parameters {
-        booleanParam(name: 'autoApprove', defaultValue: false, description: 'Automatically run apply after generating plan?')
-    } 
     environment {
         AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
     }
 
-   agent  any
+    agent any
+
     stages {
-        stage('checkout') {
+        stage('Prepare Workspace') {
             steps {
-                 script{
-                        dir("terraform")
-                        {
-                            git "https://github.com/popsi-techy/first-terraform-jenkins.git"
-                        }
+                script {
+                    sh 'mkdir -p terraform'
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                script {
+                    dir("terraform") {
+                        git "https://github.com/popsi-techy/first-terraform-jenkins.git"
                     }
                 }
             }
+        }
+
+        stage('Validate') {
+            steps {
+                script {
+                    def validateOutput = sh(script: 'cd terraform/ && terraform validate', returnStatus: true).trim()
+
+                    if (validateOutput == 0) {
+                        echo 'Terraform validation passed.'
+                    } else {
+                        error "Terraform validation failed."
+                    }
+                }
+            }
+        }
 
         stage('Plan') {
             steps {
-                sh 'pwd;cd terraform/ ; terraform init'
-                sh "pwd;cd terraform/ ; terraform plan -out tfplan"
-                sh 'pwd;cd terraform/ ; terraform show -no-color tfplan > tfplan.txt'
+                script {
+                    dir("terraform") {
+                        sh 'terraform init'
+                        sh 'terraform validate'
+                        sh 'terraform plan -out tfplan'
+                        sh 'terraform show -no-color tfplan > tfplan.txt'
+                    }
+                }
             }
         }
-        stage('Approval') {
-           when {
-               not {
-                   equals expected: true, actual: params.autoApprove
-               }
-           }
 
-           steps {
-               script {
+        stage('Approval') {
+            when {
+                not {
+                    equals expected: true, actual: params.autoApprove
+                }
+            }
+
+            steps {
+                script {
                     def plan = readFile 'terraform/tfplan.txt'
-                    input message: "Do you want to apply the plan?",
-                    parameters: [text(name: 'Plan', description: 'Please review the plan', defaultValue: plan)]
-               }
-           }
-       }
+                    input message: "Are you sure you want to apply this plan?",
+                          parameters: [text(name: 'Plan', description: 'Review the plan', defaultValue: plan)]
+                }
+            }
+        }
 
         stage('Apply') {
             steps {
                 sh "pwd;cd terraform/ ; terraform apply -input=false tfplan"
             }
         }
+
+        stage('Destroy') {
+            steps {
+                script {
+                    dir("terraform") {
+                        sh 'terraform init'
+
+                        def confirmation = input(
+                            message: 'Are you sure you want to destroy the infrastructure?',
+                            parameters: [booleanParam(defaultValue: false, description: 'Yes, I am sure')]
+                        )
+
+                        if (confirmation) {
+                            sh 'terraform destroy'
+                        } else {
+                            echo 'Infrastructure destruction aborted by the user.'
+                        }
+                    }
+                }
+            }
+        }
     }
 
-  }
+    post {
+        success {
+            echo 'Build successful!'
+        }
+        failure {
+            echo 'Build not successful!'
+        }
+    }
+}
+
