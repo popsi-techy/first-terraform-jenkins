@@ -24,13 +24,7 @@ pipeline {
         stage('Validate') {
             steps {
                 script {
-                    def validateOutput = sh(script: 'cd terraform/ && terraform validate', returnStatus: true).trim()
-
-                    if (validateOutput == 0) {
-                        echo 'Terraform validation passed.'
-                    } else {
-                        error "Terraform validation failed."
-                    }
+                    sh "cd terraform/ && terraform validate"
                 }
             }
         }
@@ -40,7 +34,6 @@ pipeline {
                 script {
                     dir("terraform") {
                         sh 'terraform init'
-                        sh 'terraform validate'
                         sh 'terraform plan -out tfplan'
                         sh 'terraform show -no-color tfplan > tfplan.txt'
                     }
@@ -56,15 +49,23 @@ pipeline {
             steps {
                 script {
                     def plan = readFile 'terraform/tfplan.txt'
-                    input message: "Are you sure you want to apply this plan?",
-                          parameters: [text(name: 'Plan', description: 'Review the plan', defaultValue: plan)]
+                    input message: "Review the Terraform plan",
+                          parameters: [text(name: 'Plan', defaultValue: plan)]
                 }
             }
         }
 
         stage('Apply') {
+            when {
+                expression { params.autoApprove || currentBuild.resultIsBetterOrEqualTo('UNSTABLE') }
+            }
+
             steps {
-                sh "cd terraform/ && terraform apply -input=false tfplan"
+                script {
+                    dir("terraform") {
+                        sh 'terraform apply -auto-approve'
+                    }
+                }
             }
         }
 
@@ -80,7 +81,7 @@ pipeline {
                         )
 
                         if (confirmation) {
-                            sh 'terraform destroy'
+                            sh 'terraform destroy -auto-approve'
                         } else {
                             echo 'Infrastructure destruction aborted by the user.'
                         }
@@ -91,6 +92,10 @@ pipeline {
     }
 
     post {
+        always {
+            cleanWs()
+        }
+
         success {
             echo 'Build successful!'
         }
@@ -99,5 +104,4 @@ pipeline {
         }
     }
 }
-
 
