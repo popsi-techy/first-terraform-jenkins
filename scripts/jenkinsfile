@@ -10,15 +10,6 @@ pipeline {
 
     agent any
 
-    stages {
-        stage('Prepare Workspace') {
-            steps {
-                script {
-                    sh 'mkdir -p terraform'
-                }
-            }
-        }
-
         stage('Checkout') {
             steps {
                 script {
